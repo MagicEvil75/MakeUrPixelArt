@@ -8,7 +8,7 @@
   --accent: #7c5cff;
   --accent-2: #ffb703;
   color-scheme: dark;
-}
+} /*Définir les couleurs du site*/
 
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
