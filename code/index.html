@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pixelizer – images en pixel art</title>
+<meta name="description" content="Transformez une image en pixel art guidé par des pipettes de couleurs, retouchez-la au pixel près et téléchargez-la.">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="topbar">
+  <h1><span class="logo" aria-hidden="true"></span>Pixelizer</h1>
+  <nav class="steps">
+    <button id="tab1" class="tab active" type="button">1 · Conversion</button>
+    <button id="tab2" class="tab" type="button" disabled>2 · Retouche</button>
+  </nav>
+  <div class="export">
+    <label>Export
+      <select id="exportScale">
+        <option value="1">Taille réelle (×1)</option>
+        <option value="2">×2</option>
+        <option value="4">×4</option>
+        <option value="8" selected>×8</option>
+        <option value="16">×16</option>
+        <option value="32">×32</option>
+      </select>
+    </label>
+    <span id="exportInfo" class="muted"></span>
+    <button id="btnDownload" class="primary" type="button" disabled>Télécharger PNG</button>
+  </div>
+</header>
+
+<!-- ============ ÉTAPE 1 : CONVERSION ============ -->
+<main id="view1" class="layout">
+  <aside class="panel">
+    <section>
+      <h2>Image source</h2>
+      <button id="btnOpen" type="button">Choisir une image…</button>
+      <input id="fileInput" type="file" accept="image/*" hidden>
+      <p class="hint">Vous pouvez aussi glisser-déposer ou coller (Ctrl+V) une image. Les pixels transparents restent transparents.</p>
+    </section>
+
+    <fieldset id="controls" disabled>
+      <section>
+        <h2>Résolution</h2>
+        <label class="row-label">Largeur de sortie <output id="widthOut">64</output></label>
+        <div class="inline">
+          <input type="range" id="width" min="8" max="256" value="64">
+          <input type="number" id="widthNum" min="8" max="256" value="64">
+        </div>
+        <div class="chips">
+          <button type="button" class="chip" data-w="16">16</button>
+          <button type="button" class="chip" data-w="32">32</button>
+          <button type="button" class="chip" data-w="64">64</button>
+          <button type="button" class="chip" data-w="96">96</button>
+          <button type="button" class="chip" data-w="128">128</button>
+          <button type="button" class="chip" data-w="256">256</button>
+        </div>
+        <p class="hint">La hauteur s’ajuste automatiquement aux proportions de l’image.</p>
+      </section>
+
+      <section>
+        <h2>Rendu</h2>
+        <label class="row-label">Couleur de base d’un pixel
+          <select id="baseMode">
+            <option value="avg">Moyenne du bloc (doux)</option>
+            <option value="dominant">Couleur dominante (net)</option>
+          </select>
+        </label>
+        <label class="row-label">Seuil de transparence <output id="alphaTOut">50</output>&nbsp;%</label>
+        <input type="range" id="alphaT" min="1" max="100" value="50">
+        <p class="hint">Part minimale de pixels opaques dans un bloc pour qu’il reste visible.</p>
+      </section>
+
+      <section>
+        <h2>Pipettes guides</h2>
+        <p class="hint">Cliquez sur l’image originale pour poser une pipette. Glissez-la pour la déplacer, double-cliquez pour la supprimer.</p>
+        <div id="pickList" class="picklist"></div>
+        <button id="btnClearPicks" type="button" class="small">Tout effacer</button>
+
+        <label class="row-label">Priorité des guides <output id="priorityOut">70</output>&nbsp;%</label>
+        <input type="range" id="priority" min="0" max="100" value="70">
+        <p class="hint">Plus c’est haut, plus un petit détail de la couleur d’une pipette est conservé dans le pixel.</p>
+
+        <label class="row-label">Tolérance de couleur <output id="tolOut">50</output></label>
+        <input type="range" id="tol" min="5" max="200" value="50">
+
+        <label class="check"><input type="checkbox" id="exact" checked> Utiliser la couleur exacte de la pipette</label>
+        <label class="check"><input type="checkbox" id="snap"> Limiter la palette aux pipettes</label>
+      </section>
+    </fieldset>
+  </aside>
+
+  <section class="stage-area">
+    <div id="dropzone" class="dropzone" tabindex="0" role="button">
+      <strong>Déposez une image ici</strong>
+      <span>ou cliquez pour parcourir · Ctrl+V pour coller</span>
+      <small>PNG, JPG, WebP, GIF, SVG… (la transparence est conservée)</small>
+    </div>
+
+    <div id="panes" class="panes" hidden>
+      <figure class="pane">
+        <figcaption><span>Original <span id="srcInfo" class="muted"></span></span></figcaption>
+        <div class="box" id="srcBox">
+          <div class="stage checker" id="srcStage">
+            <canvas id="srcCanvas"></canvas>
+            <div id="markers"></div>
+          </div>
+        </div>
+      </figure>
+      <figure class="pane">
+        <figcaption>
+          <span>Résultat <span id="outInfo" class="muted"></span></span>
+          <button id="btnToEdit" type="button" class="primary small">Retoucher →</button>
+        </figcaption>
+        <div class="box" id="outBox">
+          <div class="stage checker" id="outStage">
+            <canvas id="previewCanvas"></canvas>
+          </div>
+        </div>
+      </figure>
+    </div>
+  </section>
+</main>
+
+<!-- ============ ÉTAPE 2 : RETOUCHE ============ -->
+<main id="view2" class="layout" hidden>
+  <aside class="panel">
+    <section>
+      <h2>Outils</h2>
+      <div class="tools" id="tools">
+        <button type="button" class="tool active" data-tool="pen" title="Crayon (P)">Crayon <kbd>P</kbd></button>
+        <button type="button" class="tool" data-tool="eraser" title="Gomme (E)">Gomme <kbd>E</kbd></button>
+        <button type="button" class="tool" data-tool="fill" title="Pot de peinture (F)">Remplir <kbd>F</kbd></button>
+        <button type="button" class="tool" data-tool="wand" title="Baguette : efface une zone, par exemple le fond (W)">Effacer zone <kbd>W</kbd></button>
+        <button type="button" class="tool" data-tool="pick" title="Pipette (I) · ou Alt + clic avec n’importe quel outil">Pipette <kbd>I</kbd></button>
+      </div>
+
+      <label class="row-label">Couleur active</label>
+      <input type="color" id="curColor" value="#e74c3c">
+
+      <label class="row-label">Taille du pinceau <output id="brushOut">1</output></label>
+      <input type="range" id="brush" min="1" max="8" value="1">
+
+      <label class="row-label">Tolérance (remplir / effacer zone) <output id="wtolOut">25</output></label>
+      <input type="range" id="wtol" min="0" max="120" value="25">
+      <label class="check"><input type="checkbox" id="contig" checked> Zone contiguë seulement</label>
+    </section>
+
+    <section>
+      <h2>Édition</h2>
+      <div class="inline">
+        <button id="btnUndo" type="button" disabled>↶ Annuler</button>
+        <button id="btnRedo" type="button" disabled>↷ Rétablir</button>
+      </div>
+      <div class="inline">
+        <button id="btnZoomOut" type="button" aria-label="Dézoomer">−</button>
+        <span>Zoom <output id="zoomOut">8×</output></span>
+        <button id="btnZoomIn" type="button" aria-label="Zoomer">+</button>
+      </div>
+      <label class="check"><input type="checkbox" id="showGrid" checked> Afficher la grille</label>
+      <p class="hint">Ctrl + molette pour zoomer · Ctrl+Z / Ctrl+Y pour annuler / rétablir.</p>
+    </section>
+
+    <section>
+      <h2>Palette de l’image</h2>
+      <div id="palette" class="palette"></div>
+    </section>
+
+    <section>
+      <button id="btnBack" type="button" class="small">← Retour aux réglages</button>
+      <p class="hint">Revenir aux réglages régénère l’image et efface les retouches.</p>
+    </section>
+  </aside>
+
+  <section class="stage-area">
+    <div class="edit-head"><span id="editInfo" class="muted"></span></div>
+    <div class="editbox" id="editBox">
+      <div class="stage checker" id="editStage">
+        <canvas id="editCanvas"></canvas>
+        <div id="gridOverlay"></div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<div id="toast" class="toast" role="status" aria-live="polite"></div>
+<script src="script.js"></script>
+</body>
+</html>
