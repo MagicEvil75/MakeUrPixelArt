@@ -702,8 +702,14 @@ function cellFromEvent(e) {
 
     if (tool === 'pick') { pickColorAt(x, y); return; }
     if (tool === 'crop') {
-      stroke = { crop: true };
-      state.sel = { x0: x, y0: y, x1: x, y1: y };
+      const r = selRect();
+      if (r && x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h) {
+        // clic dans la sélection existante : on la déplace
+        stroke = { crop: true, move: true, sx: x, sy: y, r };
+      } else {
+        stroke = { crop: true };
+        state.sel = { x0: x, y0: y, x1: x, y1: y };
+      }
       canvas.setPointerCapture(e.pointerId);
       updateCropBox();
       return;
@@ -721,11 +727,29 @@ function cellFromEvent(e) {
   });
 
   canvas.addEventListener('pointermove', (e) => {
-    if (!stroke) return;
+    if (!stroke) {
+      // curseur « déplacer » quand on survole la sélection avec l'outil Recadrer
+      if (state.tool === 'crop') {
+        const r = selRect();
+        const c = cellFromEvent(e);
+        const inside = r && c.x >= r.x && c.x < r.x + r.w && c.y >= r.y && c.y < r.y + r.h;
+        canvas.style.cursor = inside ? 'move' : '';
+      } else if (canvas.style.cursor) {
+        canvas.style.cursor = '';
+      }
+      return;
+    }
     const { x, y } = cellFromEvent(e);
     if (stroke.crop) {
-      state.sel.x1 = x;
-      state.sel.y1 = y;
+      if (stroke.move) {
+        const r = stroke.r, a = state.art;
+        const nx = clamp(r.x + x - stroke.sx, 0, a.w - r.w);
+        const ny = clamp(r.y + y - stroke.sy, 0, a.h - r.h);
+        state.sel = { x0: nx, y0: ny, x1: nx + r.w - 1, y1: ny + r.h - 1 };
+      } else {
+        state.sel.x1 = x;
+        state.sel.y1 = y;
+      }
       updateCropBox();
       return;
     }
@@ -738,9 +762,10 @@ function cellFromEvent(e) {
   const end = () => {
     if (!stroke) return;
     if (stroke.crop) {
+      const moved = stroke.move;
       stroke = null;
       const s = state.sel;
-      if (s && s.x0 === s.x1 && s.y0 === s.y1) clearSelection(); // simple clic : pas de sélection
+      if (!moved && s && s.x0 === s.x1 && s.y0 === s.y1) clearSelection(); // simple clic : pas de sélection
       return;
     }
     stroke = null;
