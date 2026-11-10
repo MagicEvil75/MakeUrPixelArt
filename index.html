@@ -3,14 +3,14 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Pixelizer – images en pixel art</title>
-<meta name="description" content="Transformez une image en pixel art guidé par des pipettes de couleurs, retouchez-la au pixel près et téléchargez-la.">
-<link rel="stylesheet" href="code/style.css">
+<title>MakeUrPixelArt – images en pixel art</title>
+<meta name="description" content="MakeUrPixelArt : transformez une image en pixel art guidé par des pipettes de couleurs, retouchez-la au pixel près, recadrez-la et téléchargez-la.">
+<link rel="stylesheet" href="style.css">
 </head>
 <body>
 
 <header class="topbar">
-  <h1><span class="logo" aria-hidden="true"></span>Pixelizer</h1>
+  <h1><span class="logo" aria-hidden="true"></span>MakeUrPixelArt</h1>
   <nav class="steps">
     <button id="tab1" class="tab active" type="button">1 · Conversion</button>
     <button id="tab2" class="tab" type="button" disabled>2 · Retouche</button>
@@ -135,6 +135,7 @@
         <button type="button" class="tool" data-tool="fill" title="Pot de peinture (F)">Remplir <kbd>F</kbd></button>
         <button type="button" class="tool" data-tool="wand" title="Baguette : efface une zone, par exemple le fond (W)">Effacer zone <kbd>W</kbd></button>
         <button type="button" class="tool" data-tool="pick" title="Pipette (I) · ou Alt + clic avec n’importe quel outil">Pipette <kbd>I</kbd></button>
+        <button type="button" class="tool" data-tool="crop" title="Recadrer : tracez un rectangle (C)">Recadrer <kbd>C</kbd></button>
       </div>
 
       <label class="row-label">Couleur active</label>
@@ -164,6 +165,17 @@
     </section>
 
     <section>
+      <h2>Recadrage</h2>
+      <p class="hint">Choisissez l’outil Recadrer, tracez un rectangle sur l’image, puis validez (bouton ou Entrée). Échap pour désélectionner.</p>
+      <div id="cropInfo" class="muted">Aucune sélection</div>
+      <div class="inline">
+        <button id="btnCrop" type="button" class="primary" disabled>Recadrer</button>
+        <button id="btnCropClear" type="button">Désélectionner</button>
+      </div>
+      <button id="btnTrim" type="button" class="small">Rogner les bords transparents</button>
+    </section>
+
+    <section>
       <h2>Palette de l’image</h2>
       <div id="palette" class="palette"></div>
     </section>
@@ -180,12 +192,13 @@
       <div class="stage checker" id="editStage">
         <canvas id="editCanvas"></canvas>
         <div id="gridOverlay"></div>
+        <div id="cropBox" hidden></div>
       </div>
     </div>
   </section>
 </main>
 
 <div id="toast" class="toast" role="status" aria-live="polite"></div>
-<script src="code/script.js"></script>
+<script src="script.js"></script>
 </body>
 </html>

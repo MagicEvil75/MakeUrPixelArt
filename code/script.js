@@ -7,7 +7,7 @@
 const $ = (id) => document.getElementById(id);
 
 const MAX_SRC = 1600;   // taille max (px) du côté le plus long de l'image de travail
-const MAX_PICKS = 24;
+const MAX_PICKS = 32;
 const ZOOMS = [1, 2, 3, 4, 5, 6, 8, 10, 12, 16, 20, 24, 32, 48, 64];
 
 const state = {
@@ -22,6 +22,7 @@ const state = {
   tool: 'pen',
   color: [231, 76, 60],
   zoom: 8,
+  sel: null,            // sélection de recadrage { x0, y0, x1, y1 } (cellules)
 };
 
 /* ------------------------------ utilitaires ------------------------------ */
@@ -463,6 +464,7 @@ function showView(n, force) {
   } else {
     const a = state.art, box = $('editBox');
     state.zoom = clamp(Math.floor(Math.min((box.clientWidth - 28) / a.w, (box.clientHeight - 28) / a.h)), 1, 64);
+    state.sel = null;
     applyZoom();
     renderArt();
     renderPalette();
@@ -508,6 +510,7 @@ function applyZoom() {
   const g = $('gridOverlay');
   g.style.backgroundSize = `${state.zoom}px ${state.zoom}px`;
   g.hidden = !($('showGrid').checked && state.zoom >= 6);
+  updateCropBox();
 }
 
 function stepZoom(dir) {
@@ -528,8 +531,20 @@ $('editBox').addEventListener('wheel', (e) => {
 }, { passive: false });
 
 /* annuler / rétablir */
+function snapshot() {
+  const a = state.art;
+  return { w: a.w, h: a.h, data: a.data.slice() };
+}
+function restore(s) {
+  const resized = s.w !== state.art.w || s.h !== state.art.h;
+  state.art = { w: s.w, h: s.h, data: s.data };
+  if (resized) {
+    state.sel = null;
+    applyZoom();
+  }
+}
 function pushUndo() {
-  state.undo.push(state.art.data.slice());
+  state.undo.push(snapshot());
   if (state.undo.length > 60) state.undo.shift();
   state.redo = [];
   state.dirty = true;
@@ -537,14 +552,14 @@ function pushUndo() {
 }
 function undo() {
   if (!state.undo.length) return;
-  state.redo.push(state.art.data.slice());
-  state.art.data.set(state.undo.pop());
+  state.redo.push(snapshot());
+  restore(state.undo.pop());
   afterEdit();
 }
 function redo() {
   if (!state.redo.length) return;
-  state.undo.push(state.art.data.slice());
-  state.art.data.set(state.redo.pop());
+  state.undo.push(snapshot());
+  restore(state.redo.pop());
   afterEdit();
 }
 function updateUndoButtons() {
@@ -686,6 +701,13 @@ function cellFromEvent(e) {
     const tool = e.altKey ? 'pick' : state.tool;
 
     if (tool === 'pick') { pickColorAt(x, y); return; }
+    if (tool === 'crop') {
+      stroke = { crop: true };
+      state.sel = { x0: x, y0: y, x1: x, y1: y };
+      canvas.setPointerCapture(e.pointerId);
+      updateCropBox();
+      return;
+    }
     pushUndo();
     if (tool === 'pen' || tool === 'eraser') {
       stroke = { x, y, erase: tool === 'eraser' };
@@ -701,6 +723,12 @@ function cellFromEvent(e) {
   canvas.addEventListener('pointermove', (e) => {
     if (!stroke) return;
     const { x, y } = cellFromEvent(e);
+    if (stroke.crop) {
+      state.sel.x1 = x;
+      state.sel.y1 = y;
+      updateCropBox();
+      return;
+    }
     if (x === stroke.x && y === stroke.y) return;
     line(stroke.x, stroke.y, x, y, (px, py) => paintBrush(px, py, stroke.erase));
     stroke.x = x; stroke.y = y;
@@ -709,12 +737,97 @@ function cellFromEvent(e) {
 
   const end = () => {
     if (!stroke) return;
+    if (stroke.crop) {
+      stroke = null;
+      const s = state.sel;
+      if (s && s.x0 === s.x1 && s.y0 === s.y1) clearSelection(); // simple clic : pas de sélection
+      return;
+    }
     stroke = null;
     afterEdit();
   };
   canvas.addEventListener('pointerup', end);
   canvas.addEventListener('pointercancel', end);
 })();
+
+/* ------------------------------ recadrage ------------------------------ */
+
+function selRect() {
+  const s = state.sel;
+  if (!s) return null;
+  const x = Math.min(s.x0, s.x1), y = Math.min(s.y0, s.y1);
+  return { x, y, w: Math.abs(s.x1 - s.x0) + 1, h: Math.abs(s.y1 - s.y0) + 1 };
+}
+
+function updateCropBox() {
+  const box = $('cropBox'), r = state.art ? selRect() : null;
+  if (!r) {
+    box.hidden = true;
+    $('btnCrop').disabled = true;
+    $('btnCropClear').disabled = true;
+    $('cropInfo').textContent = 'Aucune sélection';
+    return;
+  }
+  box.hidden = false;
+  box.style.left = r.x * state.zoom + 'px';
+  box.style.top = r.y * state.zoom + 'px';
+  box.style.width = r.w * state.zoom + 'px';
+  box.style.height = r.h * state.zoom + 'px';
+  $('btnCrop').disabled = false;
+  $('btnCropClear').disabled = false;
+  $('cropInfo').textContent = `Sélection : ${r.w} × ${r.h} px`;
+}
+
+function clearSelection() {
+  state.sel = null;
+  updateCropBox();
+}
+
+function cropTo(x, y, w, h) {
+  const a = state.art;
+  pushUndo();
+  const out = new Uint8ClampedArray(w * h * 4);
+  for (let row = 0; row < h; row++) {
+    const si = ((y + row) * a.w + x) * 4;
+    out.set(a.data.subarray(si, si + w * 4), row * w * 4);
+  }
+  state.art = { w, h, data: out };
+  state.sel = null;
+  const box = $('editBox');
+  state.zoom = clamp(Math.floor(Math.min((box.clientWidth - 28) / w, (box.clientHeight - 28) / h)), 1, 64);
+  applyZoom();
+  afterEdit();
+}
+
+function applyCrop() {
+  const r = selRect();
+  if (!r || !state.art) return;
+  if (r.w === state.art.w && r.h === state.art.h) { clearSelection(); return; }
+  cropTo(r.x, r.y, r.w, r.h);
+}
+
+function trimTransparent() {
+  const a = state.art;
+  if (!a) return;
+  let minX = a.w, minY = a.h, maxX = -1, maxY = -1;
+  for (let y = 0; y < a.h; y++) {
+    for (let x = 0; x < a.w; x++) {
+      if (a.data[(y * a.w + x) * 4 + 3] === 0) continue;
+      if (x < minX) minX = x;
+      if (x > maxX) maxX = x;
+      if (y < minY) minY = y;
+      if (y > maxY) maxY = y;
+    }
+  }
+  if (maxX < 0) { toast('L’image est entièrement transparente.'); return; }
+  const w = maxX - minX + 1, h = maxY - minY + 1;
+  if (w === a.w && h === a.h) { toast('Aucun bord transparent à rogner.'); return; }
+  cropTo(minX, minY, w, h);
+}
+
+$('btnCrop').addEventListener('click', applyCrop);
+$('btnCropClear').addEventListener('click', clearSelection);
+$('btnTrim').addEventListener('click', trimTransparent);
 
 /* ------------------------------ export ------------------------------ */
 
@@ -783,15 +896,21 @@ window.addEventListener('paste', (e) => {
 /* ------------------------------ raccourcis clavier ------------------------------ */
 
 window.addEventListener('keydown', (e) => {
-  const tag = (e.target.tagName || '').toLowerCase();
-  if (tag === 'input' || tag === 'select' || tag === 'textarea') return;
   if (state.view !== 2) return;
+  // On ne bloque que la saisie de texte : les curseurs, cases et sélecteurs de couleur
+  // gardent le focus après un clic et ne doivent pas empêcher Ctrl+Z / Ctrl+Y.
+  const tag = (e.target.tagName || '').toLowerCase();
+  const type = (e.target.type || '').toLowerCase();
+  const typing = tag === 'textarea' || (tag === 'input' && ['text', 'number', 'search', 'email', 'url', 'password'].includes(type));
+  if (typing) return;
   const mod = e.ctrlKey || e.metaKey;
   const k = e.key.toLowerCase();
   if (mod && k === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo(); return; }
   if (mod && k === 'y') { e.preventDefault(); redo(); return; }
   if (mod || e.altKey) return;
-  const tools = { p: 'pen', e: 'eraser', f: 'fill', w: 'wand', i: 'pick' };
+  if (k === 'enter' && state.sel) { e.preventDefault(); applyCrop(); return; }
+  if (k === 'escape' && state.sel) { clearSelection(); return; }
+  const tools = { p: 'pen', e: 'eraser', f: 'fill', w: 'wand', i: 'pick', c: 'crop' };
   if (tools[k]) setTool(tools[k]);
 });
 
