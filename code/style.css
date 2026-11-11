@@ -8,7 +8,7 @@
   --accent: #7c5cff;
   --accent-2: #ffb703;
   color-scheme: dark;
-} /*Définir les couleurs du site*/
+}
 
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
@@ -164,6 +164,18 @@ kbd { font: 10px monospace; color: var(--muted); border: 1px solid var(--border)
   border: 2px dashed var(--accent-2);
   box-shadow: 0 0 0 2000px rgba(0, 0, 0, .45);
 }
+#cropBox .h {
+  position: absolute; width: 10px; height: 10px; margin: -7px 0 0 -7px;
+  background: var(--accent-2); border: 1px solid #000; border-radius: 2px;
+}
+#cropBox .nw { left: 0; top: 0; }
+#cropBox .n  { left: 50%; top: 0; }
+#cropBox .ne { left: 100%; top: 0; }
+#cropBox .e  { left: 100%; top: 50%; }
+#cropBox .se { left: 100%; top: 100%; }
+#cropBox .s  { left: 50%; top: 100%; }
+#cropBox .sw { left: 0; top: 100%; }
+#cropBox .w  { left: 0; top: 50%; }
 .palette { display: grid; grid-template-columns: repeat(8, 1fr); gap: 4px; }
 .swatch { aspect-ratio: 1; padding: 0; border-radius: 4px; border: 1px solid rgba(255, 255, 255, .25); }
 .swatch.current { outline: 2px solid var(--accent-2); outline-offset: 1px; }

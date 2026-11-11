@@ -105,7 +105,9 @@ function readParams() {
     base: $('baseMode').value,
     alpha: parseInt($('alphaT').value, 10) / 100,
     tol: parseInt($('tol').value, 10),
-    minShare: Math.max(0.02, 1 - parseInt($('priority').value, 10) / 100),
+    // Part minimale d'un bloc qui doit ressembler à une pipette pour qu'elle l'emporte.
+    // Courbe quadratique : à 70 % de priorité, ~5 % suffisent (traits fins conservés).
+    minShare: Math.max(0.005, 0.6 * Math.pow(1 - parseInt($('priority').value, 10) / 100, 2)),
     exact: $('exact').checked,
     snap: $('snap').checked,
   };
@@ -181,9 +183,19 @@ function pixelate(src, P, picks) {
         }
 
         if (K) {
-          let kb = -1, kc = 0;
-          for (let k = 0; k < K; k++) if (cnt[k] > kc) { kc = cnt[k]; kb = k; }
-          if (kb >= 0 && kc / opaque >= P.minShare) {
+          // Parmi les guides assez présents dans le bloc, on garde celui qui contraste
+          // le plus avec la couleur de base : un trait noir fin l'emporte sur le fond clair.
+          let kb = -1, best = 0;
+          for (let k = 0; k < K; k++) {
+            if (!cnt[k]) continue;
+            const share = cnt[k] / opaque;
+            if (share < P.minShare) continue;
+            const c = 0.1 + dist(r, g, b, pcR[k], pcG[k], pcB[k]) / 765;
+            const score = share * c * c;
+            if (score > best) { best = score; kb = k; }
+          }
+          if (kb >= 0) {
+            const kc = cnt[kb];
             if (P.exact) { r = pcR[kb]; g = pcG[kb]; b = pcB[kb]; }
             else { r = pr[kb] / kc; g = pg[kb] / kc; b = pb[kb] / kc; }
           }
@@ -287,16 +299,26 @@ function sampleSource(u, v) {
   const { w, h, data } = state.src;
   const cx = clamp(Math.floor(u * w), 0, w - 1);
   const cy = clamp(Math.floor(v * h), 0, h - 1);
-  const rr = Math.max(1, Math.round(Math.max(w, h) / 500));
-  let n = 0, r = 0, g = 0, b = 0;
+  // Rayon = ce que couvre un pixel d'écran sur l'image de travail (au moins 1).
+  const shown = $('srcCanvas').getBoundingClientRect().width || w;
+  const rr = Math.max(1, Math.ceil(w / shown));
+  const lum = (i) => 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+  let n = 0, r = 0, g = 0, b = 0, dark = -1, dl = 1e9;
   for (let y = Math.max(0, cy - rr); y <= Math.min(h - 1, cy + rr); y++) {
     for (let x = Math.max(0, cx - rr); x <= Math.min(w - 1, cx + rr); x++) {
       const i = (y * w + x) * 4;
       if (data[i + 3] < 128) continue;
       n++; r += data[i]; g += data[i + 1]; b += data[i + 2];
+      const l = lum(i);
+      if (l < dl) { dl = l; dark = i; }
     }
   }
-  return n ? [Math.round(r / n), Math.round(g / n), Math.round(b / n)] : null;
+  if (!n) return null;
+  // Pipette magnétique : si un trait nettement plus sombre passe sous le curseur,
+  // on prend sa vraie couleur plutôt qu'une moyenne grisâtre fond + trait.
+  const avgLum = 0.299 * (r / n) + 0.587 * (g / n) + 0.114 * (b / n);
+  if ($('magnet').checked && avgLum - dl > 40) return [data[dark], data[dark + 1], data[dark + 2]];
+  return [Math.round(r / n), Math.round(g / n), Math.round(b / n)];
 }
 
 function renderMarkers() {
@@ -540,8 +562,14 @@ function restore(s) {
   state.art = { w: s.w, h: s.h, data: s.data };
   if (resized) {
     state.sel = null;
-    applyZoom();
+    fitZoom();
   }
+}
+// Zoom entier qui fait tenir l'image entière dans la zone d'édition.
+function fitZoom() {
+  const a = state.art, box = $('editBox');
+  state.zoom = clamp(Math.floor(Math.min((box.clientWidth - 28) / a.w, (box.clientHeight - 28) / a.h)), 1, 64);
+  applyZoom();
 }
 function pushUndo() {
   state.undo.push(snapshot());
@@ -702,12 +730,17 @@ function cellFromEvent(e) {
 
     if (tool === 'pick') { pickColorAt(x, y); return; }
     if (tool === 'crop') {
-      const r = selRect();
-      if (r && x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h) {
-        // clic dans la sélection existante : on la déplace
-        stroke = { crop: true, move: true, sx: x, sy: y, r };
+      const hit = hitSel(e);
+      if (hit === 'move') {
+        // clic dans la sélection : on la déplace
+        stroke = { crop: true, mode: 'move', sx: x, sy: y, r: selRect() };
+      } else if (hit) {
+        // clic sur un bord ou un coin : on redimensionne (sélection normalisée d'abord)
+        const r = selRect();
+        state.sel = { x0: r.x, y0: r.y, x1: r.x + r.w - 1, y1: r.y + r.h - 1 };
+        stroke = { crop: true, mode: hit };
       } else {
-        stroke = { crop: true };
+        stroke = { crop: true, mode: 'new' };
         state.sel = { x0: x, y0: y, x1: x, y1: y };
       }
       canvas.setPointerCapture(e.pointerId);
@@ -728,12 +761,10 @@ function cellFromEvent(e) {
 
   canvas.addEventListener('pointermove', (e) => {
     if (!stroke) {
-      // curseur « déplacer » quand on survole la sélection avec l'outil Recadrer
+      // curseur adapté (déplacer / redimensionner) au survol de la sélection
       if (state.tool === 'crop') {
-        const r = selRect();
-        const c = cellFromEvent(e);
-        const inside = r && c.x >= r.x && c.x < r.x + r.w && c.y >= r.y && c.y < r.y + r.h;
-        canvas.style.cursor = inside ? 'move' : '';
+        const hit = hitSel(e);
+        canvas.style.cursor = hit ? (HANDLE_CURSORS[hit] || '') : '';
       } else if (canvas.style.cursor) {
         canvas.style.cursor = '';
       }
@@ -741,14 +772,23 @@ function cellFromEvent(e) {
     }
     const { x, y } = cellFromEvent(e);
     if (stroke.crop) {
-      if (stroke.move) {
+      const s = state.sel, m = stroke.mode;
+      if (m === 'move') {
         const r = stroke.r, a = state.art;
         const nx = clamp(r.x + x - stroke.sx, 0, a.w - r.w);
         const ny = clamp(r.y + y - stroke.sy, 0, a.h - r.h);
         state.sel = { x0: nx, y0: ny, x1: nx + r.w - 1, y1: ny + r.h - 1 };
+      } else if (m === 'new') {
+        s.x1 = x;
+        s.y1 = y;
       } else {
-        state.sel.x1 = x;
-        state.sel.y1 = y;
+        // redimensionnement : le côté tiré s'aligne sur la ligne de grille la plus proche du
+        // pointeur, sans jamais dépasser le côté opposé ni sortir de l'image
+        const a = state.art, g = gridPos(e);
+        if (m.includes('w')) s.x0 = clamp(Math.round(g.fx), 0, s.x1);
+        if (m.includes('e')) s.x1 = clamp(Math.round(g.fx) - 1, s.x0, a.w - 1);
+        if (m.includes('n')) s.y0 = clamp(Math.round(g.fy), 0, s.y1);
+        if (m.includes('s')) s.y1 = clamp(Math.round(g.fy) - 1, s.y0, a.h - 1);
       }
       updateCropBox();
       return;
@@ -762,10 +802,10 @@ function cellFromEvent(e) {
   const end = () => {
     if (!stroke) return;
     if (stroke.crop) {
-      const moved = stroke.move;
+      const fresh = stroke.mode === 'new';
       stroke = null;
       const s = state.sel;
-      if (!moved && s && s.x0 === s.x1 && s.y0 === s.y1) clearSelection(); // simple clic : pas de sélection
+      if (fresh && s && s.x0 === s.x1 && s.y0 === s.y1) clearSelection(); // simple clic : pas de sélection
       return;
     }
     stroke = null;
@@ -782,6 +822,37 @@ function selRect() {
   if (!s) return null;
   const x = Math.min(s.x0, s.x1), y = Math.min(s.y0, s.y1);
   return { x, y, w: Math.abs(s.x1 - s.x0) + 1, h: Math.abs(s.y1 - s.y0) + 1 };
+}
+
+// Position du pointeur en coordonnées d'image, fractionnaires (les entiers sont les lignes de grille).
+function gridPos(e) {
+  const c = $('editCanvas'), r = c.getBoundingClientRect();
+  return {
+    fx: ((e.clientX - r.left) / r.width) * c.width,
+    fy: ((e.clientY - r.top) / r.height) * c.height,
+  };
+}
+
+const HANDLE_CURSORS = {
+  move: 'move', n: 'ns-resize', s: 'ns-resize', e: 'ew-resize', w: 'ew-resize',
+  nw: 'nwse-resize', se: 'nwse-resize', ne: 'nesw-resize', sw: 'nesw-resize',
+};
+
+// Où se trouve le pointeur par rapport à la sélection ? 'n', 'se', 'move'… ou null (hors sélection).
+function hitSel(e) {
+  const r = state.art ? selRect() : null;
+  if (!r) return null;
+  const canvas = $('editCanvas'), c = canvas.getBoundingClientRect();
+  const sc = c.width / canvas.width;                 // pixels d'écran par pixel d'image
+  const L = c.left + r.x * sc, R = c.left + (r.x + r.w) * sc;
+  const T = c.top + r.y * sc, B = c.top + (r.y + r.h) * sc;
+  const m = clamp(Math.min(R - L, B - T) / 3, 4, 10); // zone de prise, réduite si la sélection est petite
+  const px = e.clientX, py = e.clientY;
+  if (px < L - m || px > R + m || py < T - m || py > B + m) return null;
+  let h = '';
+  if (py <= T + m) h += 'n'; else if (py >= B - m) h += 's';
+  if (px <= L + m) h += 'w'; else if (px >= R - m) h += 'e';
+  return h || 'move';
 }
 
 function updateCropBox() {
@@ -818,9 +889,7 @@ function cropTo(x, y, w, h) {
   }
   state.art = { w, h, data: out };
   state.sel = null;
-  const box = $('editBox');
-  state.zoom = clamp(Math.floor(Math.min((box.clientWidth - 28) / w, (box.clientHeight - 28) / h)), 1, 64);
-  applyZoom();
+  fitZoom();
   afterEdit();
 }
 

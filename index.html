@@ -81,11 +81,12 @@
 
         <label class="row-label">Priorité des guides <output id="priorityOut">70</output>&nbsp;%</label>
         <input type="range" id="priority" min="0" max="100" value="70">
-        <p class="hint">Plus c’est haut, plus un petit détail de la couleur d’une pipette est conservé dans le pixel.</p>
+        <p class="hint">Plus c’est haut, plus un petit détail de la couleur d’une pipette (un trait fin, par exemple) est conservé dans le pixel.</p>
 
-        <label class="row-label">Tolérance de couleur <output id="tolOut">50</output></label>
-        <input type="range" id="tol" min="5" max="200" value="50">
+        <label class="row-label">Tolérance de couleur <output id="tolOut">80</output></label>
+        <input type="range" id="tol" min="5" max="300" value="80">
 
+        <label class="check"><input type="checkbox" id="magnet" checked> Pipette magnétique (vise les traits sombres fins)</label>
         <label class="check"><input type="checkbox" id="exact" checked> Utiliser la couleur exacte de la pipette</label>
         <label class="check"><input type="checkbox" id="snap"> Limiter la palette aux pipettes</label>
       </section>
@@ -166,7 +167,7 @@
 
     <section>
       <h2>Recadrage</h2>
-      <p class="hint">Choisissez l’outil Recadrer, tracez un rectangle sur l’image, puis faites-le glisser pour le déplacer. Validez avec le bouton ou Entrée ; Échap pour désélectionner.</p>
+      <p class="hint">Choisissez l’outil Recadrer, tracez un rectangle sur l’image. Tirez sur un bord ou un coin pour le redimensionner, glissez l’intérieur pour le déplacer. Validez avec le bouton ou Entrée ; Échap pour désélectionner.</p>
       <div id="cropInfo" class="muted">Aucune sélection</div>
       <div class="inline">
         <button id="btnCrop" type="button" class="primary" disabled>Recadrer</button>
@@ -192,7 +193,10 @@
       <div class="stage checker" id="editStage">
         <canvas id="editCanvas"></canvas>
         <div id="gridOverlay"></div>
-        <div id="cropBox" hidden></div>
+        <div id="cropBox" hidden>
+          <i class="h nw"></i><i class="h n"></i><i class="h ne"></i><i class="h e"></i>
+          <i class="h se"></i><i class="h s"></i><i class="h sw"></i><i class="h w"></i>
+        </div>
       </div>
     </div>
   </section>
