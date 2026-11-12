@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>MakeUrPixelArt – images en pixel art</title>
 <meta name="description" content="MakeUrPixelArt : transformez une image en pixel art guidé par des pipettes de couleurs, retouchez-la au pixel près, recadrez-la et téléchargez-la.">
-<link rel="stylesheet" href="code/style.css">
+<link rel="stylesheet" href="style.css">
 </head>
 <body>
 
@@ -61,6 +61,17 @@
       </section>
 
       <section>
+        <h2>Cadrage de l’original</h2>
+        <p class="hint">Recadrez <em>avant</em> la pixellisation pour garder toute la résolution sur la zone utile. Passez en mode « Recadrer » au-dessus de l’image originale, tracez un rectangle (tirez sur un bord ou un coin pour l’ajuster, glissez l’intérieur pour le déplacer), puis validez (Entrée).</p>
+        <div id="srcCropInfo" class="muted">Aucune sélection</div>
+        <div class="inline">
+          <button id="btnSrcCrop" type="button" class="primary" disabled>Recadrer</button>
+          <button id="btnSrcCropClear" type="button" disabled>Désélectionner</button>
+        </div>
+        <button id="btnSrcReset" type="button" class="small" disabled>Revenir à l’image complète</button>
+      </section>
+
+      <section>
         <h2>Rendu</h2>
         <label class="row-label">Couleur de base d’un pixel
           <select id="baseMode">
@@ -74,21 +85,42 @@
       </section>
 
       <section>
-        <h2>Pipettes guides</h2>
-        <p class="hint">Cliquez sur l’image originale pour poser une pipette. Glissez-la pour la déplacer, double-cliquez pour la supprimer.</p>
+        <h2>Traits fins</h2>
+        <label class="check"><input type="checkbox" id="lines"> Détecter et préserver les traits fins sombres <kbd>T</kbd></label>
+        <p class="hint">Repère les contours fins (feutre, encre…) avant la pixellisation : ils sont écartés du calcul des couleurs, puis redessinés d’une seule couleur.</p>
+        <div id="lineOpts" class="dim">
+          <label class="row-label">Sensibilité <output id="lineSensOut">45</output></label>
+          <input type="range" id="lineSens" min="8" max="150" value="45">
+          <label class="row-label">Épaisseur max. des traits <output id="lineThickOut">6</output>&nbsp;px</label>
+          <input type="range" id="lineThick" min="1" max="30" value="6">
+          <label class="row-label">Présence minimale par pixel <output id="lineShareOut">4</output>&nbsp;%</label>
+          <input type="range" id="lineShare" min="1" max="30" value="4">
+          <label class="row-label">Couleur des traits</label>
+          <input type="color" id="lineColor" value="#000000">
+          <label class="check"><input type="checkbox" id="thin" checked> Affiner les traits à 1 pixel</label>
+          <label class="check"><input type="checkbox" id="showLines"> Voir les traits détectés sur l’original</label>
+          <p class="hint">Astuce : activez « Voir les traits détectés », puis ajustez la sensibilité et l’épaisseur jusqu’à ce que seuls vos traits soient en rose.</p>
+        </div>
+      </section>
+
+      <section>
+        <h2>Pipettes guides <span id="pickCount" class="muted">0/32</span></h2>
+        <p class="hint">Sur l’image originale (mode « Pipettes »), cliquez pour poser une pipette. Glissez-la pour la déplacer, double-cliquez pour la supprimer. Zoomez pour viser précisément.</p>
         <div id="pickList" class="picklist"></div>
         <button id="btnClearPicks" type="button" class="small">Tout effacer</button>
 
         <label class="row-label">Priorité des guides <output id="priorityOut">70</output>&nbsp;%</label>
         <input type="range" id="priority" min="0" max="100" value="70">
-        <p class="hint">Plus c’est haut, plus un petit détail de la couleur d’une pipette (un trait fin, par exemple) est conservé dans le pixel.</p>
+        <p class="hint">Part minimale d’un bloc qui doit ressembler à une pipette pour que sa couleur l’emporte (plus c’est haut, moins il en faut).</p>
 
-        <label class="row-label">Tolérance de couleur <output id="tolOut">80</output></label>
-        <input type="range" id="tol" min="5" max="300" value="80">
+        <label class="row-label">Tolérance de couleur <output id="tolOut">50</output></label>
+        <input type="range" id="tol" min="5" max="300" value="50">
 
         <label class="check"><input type="checkbox" id="magnet" checked> Pipette magnétique (vise les traits sombres fins)</label>
         <label class="check"><input type="checkbox" id="exact" checked> Utiliser la couleur exacte de la pipette</label>
         <label class="check"><input type="checkbox" id="snap"> Limiter la palette aux pipettes</label>
+        <label class="check"><input type="checkbox" id="contrast"> Favoriser le contraste <kbd>C</kbd></label>
+        <p class="hint">Contraste activé : un détail rare mais très différent du reste du bloc (reflet, petit trait…) l’emporte sur la couleur majoritaire. Désactivé : la couleur majoritaire gagne.</p>
       </section>
     </fieldset>
   </aside>
@@ -103,18 +135,37 @@
     <div id="panes" class="panes" hidden>
       <figure class="pane">
         <figcaption><span>Original <span id="srcInfo" class="muted"></span></span></figcaption>
+        <div class="bar">
+          <div class="seg" id="srcMode">
+            <button type="button" class="segbtn active" data-mode="pick">Pipettes</button>
+            <button type="button" class="segbtn" data-mode="crop">Recadrer</button>
+          </div>
+          <div class="zoomctl">
+            <button id="srcZoomOutBtn" type="button" aria-label="Dézoomer">−</button>
+            <output id="srcZoomVal">×1</output>
+            <button id="srcZoomInBtn" type="button" aria-label="Zoomer">+</button>
+            <button id="srcZoomFit" type="button" class="small">Ajuster</button>
+          </div>
+        </div>
         <div class="box" id="srcBox">
           <div class="stage checker" id="srcStage">
             <canvas id="srcCanvas"></canvas>
+            <canvas id="lineOverlay" hidden></canvas>
+            <div id="srcCropBox" class="cropbox" hidden>
+              <i class="h nw"></i><i class="h n"></i><i class="h ne"></i><i class="h e"></i>
+              <i class="h se"></i><i class="h s"></i><i class="h sw"></i><i class="h w"></i>
+            </div>
             <div id="markers"></div>
           </div>
         </div>
+        <p class="hint">Ctrl + molette : zoom · Espace + glisser (ou clic molette) : déplacer la vue</p>
       </figure>
       <figure class="pane">
-        <figcaption>
-          <span>Résultat <span id="outInfo" class="muted"></span></span>
+        <figcaption><span>Résultat <span id="outInfo" class="muted"></span></span></figcaption>
+        <div class="bar">
+          <span></span>
           <button id="btnToEdit" type="button" class="primary small">Retoucher →</button>
-        </figcaption>
+        </div>
         <div class="box" id="outBox">
           <div class="stage checker" id="outStage">
             <canvas id="previewCanvas"></canvas>
@@ -135,8 +186,17 @@
         <button type="button" class="tool" data-tool="eraser" title="Gomme (E)">Gomme <kbd>E</kbd></button>
         <button type="button" class="tool" data-tool="fill" title="Pot de peinture (F)">Remplir <kbd>F</kbd></button>
         <button type="button" class="tool" data-tool="wand" title="Baguette : efface une zone, par exemple le fond (W)">Effacer zone <kbd>W</kbd></button>
+        <button type="button" class="tool" data-tool="outline" title="Contour : trace le pourtour d’une zone de couleur (O)">Contour <kbd>O</kbd></button>
         <button type="button" class="tool" data-tool="pick" title="Pipette (I) · ou Alt + clic avec n’importe quel outil">Pipette <kbd>I</kbd></button>
         <button type="button" class="tool" data-tool="crop" title="Recadrer : tracez un rectangle (C)">Recadrer <kbd>C</kbd></button>
+      </div>
+
+      <div id="outlineOpts" hidden>
+        <label class="row-label">Contour de la zone cliquée</label>
+        <label class="check"><input type="radio" name="olSide" value="inner" checked> Intérieur (sur les pixels de la zone)</label>
+        <label class="check"><input type="radio" name="olSide" value="outer"> Extérieur (autour de la zone)</label>
+        <label class="check"><input type="checkbox" id="olCorners" checked> Compléter les angles droits (extérieur)</label>
+        <p class="hint">Seuls les pixels au contact direct du bord sont tracés : une oblique reste une ligne nette, sans pixels de coin superflus.</p>
       </div>
 
       <label class="row-label">Couleur active</label>
@@ -145,7 +205,7 @@
       <label class="row-label">Taille du pinceau <output id="brushOut">1</output></label>
       <input type="range" id="brush" min="1" max="8" value="1">
 
-      <label class="row-label">Tolérance (remplir / effacer zone) <output id="wtolOut">25</output></label>
+      <label class="row-label">Tolérance (remplir / effacer zone / contour) <output id="wtolOut">25</output></label>
       <input type="range" id="wtol" min="0" max="120" value="25">
       <label class="check"><input type="checkbox" id="contig" checked> Zone contiguë seulement</label>
     </section>
@@ -171,7 +231,7 @@
       <div id="cropInfo" class="muted">Aucune sélection</div>
       <div class="inline">
         <button id="btnCrop" type="button" class="primary" disabled>Recadrer</button>
-        <button id="btnCropClear" type="button">Désélectionner</button>
+        <button id="btnCropClear" type="button" disabled>Désélectionner</button>
       </div>
       <button id="btnTrim" type="button" class="small">Rogner les bords transparents</button>
     </section>
@@ -193,7 +253,7 @@
       <div class="stage checker" id="editStage">
         <canvas id="editCanvas"></canvas>
         <div id="gridOverlay"></div>
-        <div id="cropBox" hidden>
+        <div id="editCropBox" class="cropbox" hidden>
           <i class="h nw"></i><i class="h n"></i><i class="h ne"></i><i class="h e"></i>
           <i class="h se"></i><i class="h s"></i><i class="h sw"></i><i class="h w"></i>
         </div>
@@ -203,6 +263,6 @@
 </main>
 
 <div id="toast" class="toast" role="status" aria-live="polite"></div>
-<script src="code/script.js"></script>
+<script src="script.js"></script>
 </body>
 </html>
